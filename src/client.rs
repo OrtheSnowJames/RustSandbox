@@ -8,8 +8,15 @@ use crate::movement;
 use crate::collision;
 
 pub fn main() {
-    let window_length: i32 = env::var("RSWINDOW_LENGTH").unwrap_or_else(|_| "1000".to_string()).parse().unwrap();
-    let window_height: i32 = env::var("RSWINDOW_HEIGHT").unwrap_or_else(|_| "1000".to_string()).parse().unwrap();
+    let mut window_length: i32 = env::var("RSWINDOW_LENGTH").unwrap_or_else(|_| "1000".to_string()).parse().unwrap();
+    let mut window_height: i32 = env::var("RSWINDOW_HEIGHT").unwrap_or_else(|_| "1000".to_string()).parse().unwrap();
+    if window_length < 1000 || window_height < 1000 {
+        //no panic just set to 1000
+        env::set_var("RSWINDOW_LENGTH", "1000");
+        env::set_var("RSWINDOW_HEIGHT", "1000");
+        window_length = env::var("RSWINDOW_LENGTH").unwrap_or_else(|_| "1000".to_string()).parse().unwrap();
+        window_height = env::var("RSWINDOW_HEIGHT").unwrap_or_else(|_| "1000".to_string()).parse().unwrap();
+    }
     let (mut rl, thread) = raylib::init()
         .size(window_length, window_height)
         .title("raylib thing")
