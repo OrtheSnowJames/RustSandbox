@@ -6,8 +6,12 @@ edition = "2021"
 [dependencies]
 async-std = "1.13.0"
 raylib = "5.0.2"
-raylib_interactive = "0.1.2"
+raylib_interactive = "0.1.4"
 serde_json = "1.0.133"
+
+[lib]
+name = "rust_sandbox_lib"
+path = "src/lib.rs"
 
 [dev-dependencies]
 async-std = { version = "1.13", features = ["attributes"] }

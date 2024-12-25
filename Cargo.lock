@@ -693,9 +693,9 @@ dependencies = [
 
 [[package]]
 name = "raylib_interactive"
-version = "0.1.2"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34e9c286c80d85f4bc04d9f7d24dcb4784a30e7e7e2d0c617fba924245068f9c"
+checksum = "0256fe6fbdb183fe9520f02238c49963b9c0c7ac2d201142e8d59cdc26d6fb40"
 dependencies = [
  "raylib",
 ]

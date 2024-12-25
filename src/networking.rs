@@ -2,6 +2,7 @@ use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub type ClientHandler = Arc<dyn Fn(TcpStream) + Send + Sync + 'static>;
 
@@ -90,13 +91,21 @@ impl AsyncTcpServer {
     }
 }
 
-pub struct AsyncTcpClient;
+pub struct AsyncTcpClient {
+    address: String,
+}
 
 impl AsyncTcpClient {
     /// Connects to a TCP server and returns a TcpStream.
-    pub async fn connect(address: &str) -> async_std::io::Result<TcpStream> {
-        let stream = TcpStream::connect(address).await?;
-        println!("Connected to server at {}", address);
+    pub fn new(address: &str) -> Self {
+        Self {
+            address: address.to_string(),
+        }
+    }
+
+    pub async fn connect(&self) -> async_std::io::Result<TcpStream> {
+        let stream = TcpStream::connect(&self.address).await?;
+        println!("Connected to server at {}", self.address);
         Ok(stream)
     }
 
@@ -113,64 +122,88 @@ impl AsyncTcpClient {
         Ok(String::from_utf8_lossy(&buffer[..n]).to_string())
     }
 }
-
-// Example Usage
+//example tests/usages
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_std::sync::Mutex;
-    use std::time::Duration;
 
     #[async_std::test]
-    async fn test_server_client() {
-        let received_data = Arc::new(Mutex::new(String::new()));
+    async fn test_basic_server_client_connection() -> async_std::io::Result<()> {
+        // Setup server
+        let server = AsyncTcpServer::new("127.0.0.1:8080", Arc::new(|_stream| {
+            println!("Client connected!");
+        }));
 
-        // Create a server that echoes received data back
-        let handler = {
-            let received_data = Arc::clone(&received_data);
-            Arc::new(move |stream: TcpStream| {
-                let received_data = Arc::clone(&received_data);
-                task::spawn(async move {
-                    let mut buffer = [0u8; 1024];
-                    let mut stream = stream; // Make stream mutable
-                    if let Ok(n) = stream.read(&mut buffer).await {
-                        let message = String::from_utf8_lossy(&buffer[..n]).to_string();
-                        {
-                            let mut received_data = received_data.lock().await;
-                            *received_data = message.clone();
-                        }
-                        let _ = stream.write_all(message.as_bytes()).await;
-                    }
-                });
-            })
-        };
-
-        let server = Arc::new(AsyncTcpServer::new("127.0.0.1:8080", handler));
-        task::spawn({
-            let server = Arc::clone(&server);
-            async move {
-                server
-                    .run_with_messages(|received, mut stream| async move {
-                        println!("Processing message: {}", received);
-                        let response = format!("Server received: {}", received);
-                        stream.write_all(response.as_bytes()).await?;
-                        stream.flush().await?;
-                        Ok(())
-                    })
-                    .await
-                    .unwrap();
-            }
+        // Start server in background
+        task::spawn(async move {
+            server.run().await.unwrap();
         });
 
-        // Give the server a moment to start
+        // Give server time to start
         task::sleep(Duration::from_millis(100)).await;
 
-        // Create a client and communicate with the server
-        let mut client = AsyncTcpClient::connect("127.0.0.1:8080").await.unwrap();
-        AsyncTcpClient::send(&mut client, "Hello, Server!").await.unwrap();
-        let response = AsyncTcpClient::receive(&mut client).await.unwrap();
+        // Connect client
+        let client = AsyncTcpClient::new("127.0.0.1:8080");
+        let result = client.connect().await;
+        assert!(result.is_ok());
 
-        assert_eq!(response, "Server received: Hello, Server!");
-        assert_eq!(*received_data.lock().await, "Hello, Server!");
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_bidirectional_communication() -> async_std::io::Result<()> {
+        // Setup server with message handler
+        let server = AsyncTcpServer::new("127.0.0.1:8081", Arc::new(|_stream| {}));
+
+        // Start server with message handling
+        task::spawn(async move {
+            server.run_with_messages(|msg, mut stream| async move {
+                // Echo the message back
+                AsyncTcpClient::send(&mut stream, &format!("Echo: {}", msg)).await?;
+                Ok(())
+            }).await.unwrap();
+        });
+
+        task::sleep(Duration::from_millis(100)).await;
+
+        // Connect client
+        let client = AsyncTcpClient::new("127.0.0.1:8081");
+        let mut stream = client.connect().await?;
+
+        // Send message
+        let test_message = "Hello, Server!";
+        AsyncTcpClient::send(&mut stream, test_message).await?;
+
+        // Receive response
+        let response = AsyncTcpClient::receive(&mut stream).await?;
+        assert_eq!(response, format!("Echo: {}", test_message));
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_multiple_clients() -> async_std::io::Result<()> {
+        let server = AsyncTcpServer::new("127.0.0.1:8082", Arc::new(|_stream| {}));
+        
+        task::spawn(async move {
+            server.run().await.unwrap();
+        });
+
+        task::sleep(Duration::from_millis(100)).await;
+
+        // Connect multiple clients
+        let client1 = AsyncTcpClient::new("127.0.0.1:8082");
+        let client2 = AsyncTcpClient::new("127.0.0.1:8082");
+        let client3 = AsyncTcpClient::new("127.0.0.1:8082");
+
+        let result1 = client1.connect().await;
+        let result2 = client2.connect().await;
+        let result3 = client3.connect().await;
+
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+        assert!(result3.is_ok());
+
+        Ok(())
     }
 }

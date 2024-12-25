@@ -1,0 +1,11 @@
+{
+  "settings": {
+    "FPS": "60",
+    "IP": "127.0.0.1",
+    "PORT": "5766",
+    "PREFERRED_LATENCY": "4",
+    "RSWINDOW_HEIGHT": "1000",
+    "RSWINDOW_LENGTH": "1000",
+    "SKIN": "0"
+  }
+}
