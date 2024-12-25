@@ -6,6 +6,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::env;
 use std::thread;
+use std::sync::{Arc, Mutex};
 use crate::movement;
 use crate::collision;
 use crate::networking::*;
@@ -75,14 +76,14 @@ pub fn main() {
     //define game here
     let room_in: i32 = 1;
     let whole_room_in: String = "room".to_string() + &room_in.to_string();
-    let game: Value = json!({
+    let game: Arc<Mutex<Value>> = Arc::new(Mutex::new(json!({
         "room1": {
             "objects": [
                 //square that player moves on
                 {"x": 0, "y": 0, "width": 1000, "height": 1000, "objID": 0},
             ]
         },
-    });
+    })));
 
 
 
@@ -96,21 +97,22 @@ pub fn main() {
     button.set_colors(Color::GRAY, Color::DARKGRAY, Color::LIGHTGRAY, Color::BLACK, Color::BLACK);
     button.set_font_size(10);
     //loop
+    let game_clone = Arc::clone(&game);
     let receive_thread: thread::JoinHandle<()> = thread::spawn(move || {
         let mut io_stream = io_stream;
         while open {
             let message = task::block_on(AsyncTcpClient::receive(&mut io_stream)).unwrap();
             println!("Received: {}", message);
-            handle_read::handle_read::handle_read_msg(&message);
+            let mut game_lock: std::sync::MutexGuard<'_, Value> = game_clone.lock().unwrap();
+            handle_read::handle_read::handle_read_msg(&message, &game_lock);
         }
     });
     while !rl.window_should_close() {
         button.update(&mut rl);
         if button.is_clicked(& mut rl) {movement.position.x = 400.0; movement.position.y = 250.0;}
-        movement.update(rl.get_frame_time());
-        let mut d: RaylibDrawHandle<'_> = rl.begin_drawing(&thread);
+        movement.update(rl.get_frame_time());        let mut d: RaylibDrawHandle<'_> = rl.begin_drawing(&thread);
         //get collisions
-        if let Some(objects) = game[whole_room_in.clone()]["objects"].as_array() {
+        if let Some(objects) = game.lock().unwrap()[whole_room_in.clone()]["objects"].as_array() {
             for object in objects {
                 if objects_interpret_inside.as_array().unwrap().contains(&object["objID"]) {
                     //treat like inside object

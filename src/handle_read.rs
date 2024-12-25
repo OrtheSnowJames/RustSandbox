@@ -4,7 +4,7 @@ use serde_json::json;
 pub struct handle_read;
 
 impl handle_read {
-    pub fn handle_read_msg(message: &String) {
+    pub fn handle_read_msg(message: &String, game: &Value) {
         // Parse the message
         let message_json: Value = serde_json::from_str(message).unwrap();
         // Check the message type (located like anywhere so whatever)
