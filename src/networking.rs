@@ -3,6 +3,9 @@ use async_std::prelude::*;
 use async_std::task;
 use std::sync::Arc;
 use std::time::Duration;
+use std::os::unix::io::AsRawFd; // For Unix-based systems
+#[cfg(windows)]
+use std::os::windows::io::AsRawSocket; // For Windows
 
 pub type ClientHandler = Arc<dyn Fn(TcpStream) + Send + Sync + 'static>;
 
@@ -89,6 +92,31 @@ impl AsyncTcpServer {
 
         Ok(())
     }
+
+    /// Sends a message over the given TcpStream.
+    pub async fn send(stream: &mut TcpStream, message: &str) -> async_std::io::Result<()> {
+        stream.write_all(message.as_bytes()).await?;
+        stream.flush().await
+    }
+
+    /// Receives a message from the given TcpStream.
+    pub async fn receive(stream: &mut TcpStream) -> async_std::io::Result<String> {
+        let mut buffer = vec![0u8; 1024];
+        let n = stream.read(&mut buffer).await?;
+        Ok(String::from_utf8_lossy(&buffer[..n]).to_string())
+    }
+
+    /// Gets the socket ID of a TcpStream.
+    pub fn get_socket_id(stream: &TcpStream) -> usize {
+        #[cfg(unix)]
+        {
+            stream.as_raw_fd() as usize
+        }
+        #[cfg(windows)]
+        {
+            stream.as_raw_socket() as usize
+        }
+    }
 }
 
 pub struct AsyncTcpClient {
@@ -120,6 +148,18 @@ impl AsyncTcpClient {
         let mut buffer = vec![0u8; 1024];
         let n = stream.read(&mut buffer).await?;
         Ok(String::from_utf8_lossy(&buffer[..n]).to_string())
+    }
+
+    /// Gets the socket ID of a TcpStream.
+    pub fn get_socket_id(stream: &TcpStream) -> usize {
+        #[cfg(unix)]
+        {
+            stream.as_raw_fd() as usize
+        }
+        #[cfg(windows)]
+        {
+            stream.as_raw_socket() as usize
+        }
     }
 }
 //example tests/usages
@@ -203,6 +243,32 @@ mod tests {
         assert!(result1.is_ok());
         assert!(result2.is_ok());
         assert!(result3.is_ok());
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_get_socket_id() -> async_std::io::Result<()> {
+        // Setup server
+        let server = AsyncTcpServer::new("127.0.0.1:8083", Arc::new(|_stream| {}));
+
+        // Start server in background
+        task::spawn(async move {
+            server.run().await.unwrap();
+        });
+
+        // Give server time to start
+        task::sleep(Duration::from_millis(100)).await;
+
+        // Connect client
+        let client = AsyncTcpClient::new("127.0.0.1:8083");
+        let stream = client.connect().await?;
+
+        // Get socket ID
+        let socket_id = AsyncTcpClient::get_socket_id(&stream);
+        println!("Socket ID: {}", socket_id);
+
+        assert!(socket_id > 0);
 
         Ok(())
     }

@@ -6,6 +6,7 @@ use serde_json::json;
 use std::thread;
 use std::env;
 mod client;
+mod randommods;
 mod settings;
 mod collision;
 mod networking;
@@ -25,5 +26,5 @@ fn main() {
     });
     println!("Client started.");
     client_thread.join().expect("Client thread panicked");
-    //add server when networking proplem is solved
+    //add server when networking problem is solved
 }

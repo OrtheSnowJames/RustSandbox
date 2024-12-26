@@ -6,3 +6,4 @@ pub mod client;
 pub mod settings;
 pub mod networking;
 pub mod handle_read;
+pub mod randommods;

@@ -11,6 +11,7 @@ use crate::movement;
 use crate::collision;
 use crate::networking::*;
 use super::*;
+use crate::randommods;
 use async_std::task;
 use std::time::Duration;
 
@@ -59,11 +60,14 @@ pub fn main() {
 
 
     //init stuff here
-
-
-
-    let mut client_communicator = AsyncTcpClient::new(format!("{}:{}", settings["IP"].as_str().unwrap(), settings["PORT"].as_str().unwrap()).as_str());
-    let io_stream: async_std::net::TcpStream = task::block_on(client_communicator.connect()).unwrap();
+    let mut checklist: Value = json!({
+        "x": 400,
+        "y": 250,
+        //TODO: add more stuff to checklist and make client/server communication
+    });
+    let mut client = AsyncTcpClient::new(format!("{}:{}", settings["IP"].as_str().unwrap(), settings["PORT"].as_str().unwrap()).as_str());
+    let mut io_stream = task::block_on(client.connect()).unwrap();
+    let sockID: i32 = AsyncTcpClient::get_socket_id(&io_stream) as i32;
     let mut movement = movement::Movement {
         position: Vector2::new(400.0, 250.0),
         speed: 5.0,
@@ -80,8 +84,11 @@ pub fn main() {
         "room1": {
             "objects": [
                 //square that player moves on
-                {"x": 0, "y": 0, "width": 1000, "height": 1000, "objID": 0},
-            ]
+                {"x": 0, "y": 0, "width": 1000, "height": 1000, "id": 0},
+            ],
+            "players": [],
+            "npcs": [],
+            "roomID": 1
         },
     })));
 
@@ -99,22 +106,40 @@ pub fn main() {
     //loop
     let game_clone = Arc::clone(&game);
     let receive_thread: thread::JoinHandle<()> = thread::spawn(move || {
-        let mut io_stream = io_stream;
         while open {
             let message = task::block_on(AsyncTcpClient::receive(&mut io_stream)).unwrap();
             println!("Received: {}", message);
-            let mut game_lock: std::sync::MutexGuard<'_, Value> = game_clone.lock().unwrap();
-            handle_read::handle_read::handle_read_msg(&message, &game_lock);
+            handle_read::handle_read::handle_read_msg(&message, Arc::clone(&game_clone));
         }
     });
+
     while !rl.window_should_close() {
         button.update(&mut rl);
-        if button.is_clicked(& mut rl) {movement.position.x = 400.0; movement.position.y = 250.0;}
-        movement.update(rl.get_frame_time());        let mut d: RaylibDrawHandle<'_> = rl.begin_drawing(&thread);
+        if button.is_clicked(&mut rl) {
+            movement.position.x = 400.0;
+            movement.position.y = 250.0;
+        }
+        movement.update(rl.get_frame_time());
+        {
+            let mut game_lock = game.lock().unwrap();
+            let player_data = json!({
+                "id": "player1",
+                "x": movement.position.x,
+                "y": movement.position.y
+            });
+            if let Some(players) = game_lock[whole_room_in.clone()]["players"].as_array_mut() {
+                if let Some(player) = players.iter_mut().find(|p| p["id"] == "player1") {
+                    *player = player_data;
+                } else {
+                    players.push(player_data);
+                }
+            }
+        }
+        let mut d: RaylibDrawHandle<'_> = rl.begin_drawing(&thread);
         //get collisions
         if let Some(objects) = game.lock().unwrap()[whole_room_in.clone()]["objects"].as_array() {
             for object in objects {
-                if objects_interpret_inside.as_array().unwrap().contains(&object["objID"]) {
+                if objects_interpret_inside.as_array().unwrap().contains(&object["id"]) {
                     //treat like inside object
                     collision::reverse_do_get_collision(&mut movement, &mut object.clone());
                 } else {
