@@ -113,6 +113,7 @@ pub fn main() {
         .size(window_length, window_height)
         .title("Settings")
         .build();
+    rl.set_target_fps(30);
     //fullscreen auto
     let monitor: i32 = 0;
     let monitor_width = rl.get_screen_width();

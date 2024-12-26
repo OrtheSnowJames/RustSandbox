@@ -15,6 +15,8 @@ pub struct AsyncTcpServer {
 }
 
 impl AsyncTcpServer {
+
+    
     /// Creates a new AsyncTcpServer instance.
     pub fn new(address: &str, handler: ClientHandler) -> Self {
         Self {
@@ -162,6 +164,60 @@ impl AsyncTcpClient {
         }
     }
 }
+//basic other functions
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::process::Command;
+
+#[cfg(target_os = "windows")]
+fn get_local_ip() -> Result<IpAddr, Box<dyn std::error::Error>> {
+    // Windows implementation using `ipconfig`
+    let output = Command::new("ipconfig")
+        .arg("/all")
+        .output()?;
+
+    if !output.status.success() {
+        return Err("Failed to execute `ipconfig` command".into());
+    }
+
+    let stdout = String::from_utf8(output.stdout)?;
+
+    // Extract IPv4 address (example: adjust based on your `ipconfig` output)
+    if let Some(line) = stdout.lines().find(|l| l.contains("IPv4 Address")) {
+        let parts: Vec<&str> = line.split(": ").collect();
+        if let Ok(ip) = parts[1].trim().parse::<Ipv4Addr>() {
+            return Ok(IpAddr::V4(ip));
+        }
+    }
+
+    Err("Failed to parse IP address from `ipconfig` output".into())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub fn get_local_ip() -> Result<IpAddr, Box<dyn std::error::Error>> {
+    // Linux/macOS implementation using `ip`
+    let output = Command::new("ip")
+        .arg("addr")
+        .arg("show")
+        .output()?;
+
+    if !output.status.success() {
+        return Err("Failed to execute `ip` command".into());
+    }
+
+    let stdout = String::from_utf8(output.stdout)?;
+
+    // Extract IPv4 address (example: adjust based on your `ip` output)
+    if let Some(line) = stdout.lines().find(|l| l.contains("inet ")) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if let Ok(ip) = parts[1].parse::<Ipv4Addr>() {
+            return Ok(IpAddr::V4(ip));
+        }
+    }
+
+    Err("Failed to parse IP address from `ip` output".into())
+}
+
+
 //example tests/usages
 #[cfg(test)]
 mod tests {
@@ -176,7 +232,7 @@ mod tests {
 
         // Start server in background
         task::spawn(async move {
-            server.run().await.unwrap();
+            server.run().await.expect("Server failed to run");
         });
 
         // Give server time to start
@@ -201,7 +257,7 @@ mod tests {
                 // Echo the message back
                 AsyncTcpClient::send(&mut stream, &format!("Echo: {}", msg)).await?;
                 Ok(())
-            }).await.unwrap();
+            }).await.expect("Server failed to run with messages");
         });
 
         task::sleep(Duration::from_millis(100)).await;
@@ -226,7 +282,7 @@ mod tests {
         let server = AsyncTcpServer::new("127.0.0.1:8082", Arc::new(|_stream| {}));
         
         task::spawn(async move {
-            server.run().await.unwrap();
+            server.run().await.expect("Server failed to run");
         });
 
         task::sleep(Duration::from_millis(100)).await;

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 async-std = "1.13.0"
+native-dialog = "0.7.0"
 raylib = "5.0.2"
 raylib_interactive = "0.1.4"
 serde_json = "1.0.133"
