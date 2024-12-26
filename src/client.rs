@@ -11,6 +11,7 @@ use std::ops::DerefMut;
 use crate::movement;
 use crate::collision;
 use crate::networking::*;
+use crate::randommods::get_socket_id;
 use super::*;
 use crate::randommods;
 use async_std::task;
@@ -18,7 +19,7 @@ use std::time::Duration;
 
 pub fn main() {
     // Read settings from data.json
-    let settings = if std::path::Path::new("data.json").exists() {
+    let settings: Value = if std::path::Path::new("data.json").exists() {
         let file = std::fs::File::open("data.json").unwrap();
         let data: Value = serde_json::from_reader(file).unwrap();
         data["settings"].clone()
@@ -61,11 +62,7 @@ pub fn main() {
 
 
     //init stuff here
-    let mut checklist: Value = json!({
-        "x": 400,
-        "y": 250,
-        //TODO: add more stuff to checklist and make client/server communication
-    });
+    
     let mut client = AsyncTcpClient::new(format!("{}:{}", settings["IP"].as_str().unwrap(), settings["PORT"].as_str().unwrap()).as_str());
     let io_stream = Arc::new(Mutex::new(task::block_on(client.connect()).unwrap()));
     let sockID: i32 = AsyncTcpClient::get_socket_id(&io_stream.lock().unwrap()) as i32;
@@ -96,7 +93,20 @@ pub fn main() {
         height: 50,
     };
 
-
+    let mut checklist: Value = json!({
+        "x": 400,
+        "y": 250,
+        "width": 50,
+        "height": 50,
+        "id": get_socket_id(&*io_stream.lock().unwrap()),
+        "initGameFully": false,
+        "localPlayerSet": false,
+        "room": 1,
+        //spritestate uses cardinal directions
+        "spriteState": 3,
+        "skin": settings["SKIN"].as_str().unwrap_or("0").parse::<i32>().unwrap(),
+        "shields": 0,
+    });
 
     //define game here
     let room_in: i32 = 1;
@@ -132,7 +142,7 @@ pub fn main() {
         while open {
             let message = task::block_on(AsyncTcpClient::receive(&mut io_stream.lock().unwrap())).unwrap();
             println!("Received: {}", message);
-            handle_read::handle_read::handle_read_msg(&message, Arc::clone(&game_clone));
+            handle_read::handle_read::handle_read_msg(&message, Arc::clone(&game_clone), &mut io_stream.lock().unwrap());
         }
     });
 
