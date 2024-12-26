@@ -1,0 +1,6 @@
+{
+  "launch": [
+    "server.rs",
+    "client.rs"
+  ]
+}
