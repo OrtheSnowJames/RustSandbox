@@ -163,6 +163,70 @@ impl AsyncTcpClient {
             stream.as_raw_socket() as usize
         }
     }
+
+    /// Starts a continuous message handling loop
+    pub async fn handle_messages<F, Fut>(&self, stream: &mut TcpStream, message_handler: F) -> async_std::io::Result<()>
+    where
+        F: Fn(String) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = async_std::io::Result<()>> + Send + 'static,
+    {
+        let mut buffer = [0; 1024];
+        loop {
+            match stream.read(&mut buffer).await {
+                Ok(0) => break, // Connection closed
+                Ok(n) => {
+                    let received = String::from_utf8_lossy(&buffer[..n]).to_string();
+                    message_handler(received).await?;
+                }
+                Err(e) => {
+                    eprintln!("Failed to read from server: {}", e);
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Starts an interactive session with the server
+    pub async fn start_interactive_session(mut stream: TcpStream) -> async_std::io::Result<()> {
+        let mut read_stream = stream.clone();
+        
+        // Spawn a task to handle incoming messages
+        task::spawn(async move {
+            let mut buffer = [0; 1024];
+            loop {
+                match read_stream.read(&mut buffer).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let msg = String::from_utf8_lossy(&buffer[..n]);
+                        println!("Received: {}", msg);
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Main task handles sending messages
+        let mut input = String::new();
+        loop {
+            input.clear();
+            if std::io::stdin().read_line(&mut input).is_err() {
+                break;
+            }
+            if input.trim() == "quit" {
+                break;
+            }
+            if let Err(e) = Self::send(&mut stream, &input).await {
+                eprintln!("Error sending: {}", e);
+                break;
+            }
+        }
+
+        Ok(())
+    }
 }
 //basic other functions
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -326,6 +390,46 @@ mod tests {
 
         assert!(socket_id > 0);
 
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_continuous_messaging() -> async_std::io::Result<()> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        // Setup server
+        let server = AsyncTcpServer::new("127.0.0.1:8084", Arc::new(|_stream| {}));
+        let message_count = Arc::new(AtomicUsize::new(0));
+        let message_count_clone = message_count.clone();
+
+        // Start server with continuous message handling
+        task::spawn(async move {
+            server.run_with_messages(move |msg, mut stream| {
+                let message_count_clone = Arc::clone(&message_count_clone);
+                async move {
+                    message_count_clone.fetch_add(1, Ordering::SeqCst);
+                    AsyncTcpServer::send(&mut stream, &format!("Echo: {}", msg)).await
+                }
+            })
+            .await
+            .expect("Server failed to run");
+        });
+
+        task::sleep(Duration::from_millis(100)).await;
+
+        // Connect client
+        let client = AsyncTcpClient::new("127.0.0.1:8084");
+        let mut stream = client.connect().await?;
+
+        // Send multiple messages
+        for i in 0..5 {
+            AsyncTcpClient::send(&mut stream, &format!("Message {}", i)).await?;
+            let response = AsyncTcpClient::receive(&mut stream).await?;
+            assert_eq!(response, format!("Echo: Message {}", i));
+        }
+
+        assert_eq!(message_count.load(Ordering::SeqCst), 5);
         Ok(())
     }
 }

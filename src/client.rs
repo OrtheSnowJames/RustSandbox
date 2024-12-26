@@ -7,6 +7,7 @@ use serde_json::json;
 use std::env;
 use std::thread;
 use std::sync::{Arc, Mutex};
+use std::ops::DerefMut;
 use crate::movement;
 use crate::collision;
 use crate::networking::*;
@@ -66,8 +67,28 @@ pub fn main() {
         //TODO: add more stuff to checklist and make client/server communication
     });
     let mut client = AsyncTcpClient::new(format!("{}:{}", settings["IP"].as_str().unwrap(), settings["PORT"].as_str().unwrap()).as_str());
-    let mut io_stream = task::block_on(client.connect()).unwrap();
-    let sockID: i32 = AsyncTcpClient::get_socket_id(&io_stream) as i32;
+    let io_stream = Arc::new(Mutex::new(task::block_on(client.connect()).unwrap()));
+    let sockID: i32 = AsyncTcpClient::get_socket_id(&io_stream.lock().unwrap()) as i32;
+
+    // Create message channel for communication between render and network threads
+    let (tx, rx) = async_std::channel::bounded(100);
+    let tx_clone = tx.clone();
+
+    // Spawn network receive handler
+    let io_stream_clone = Arc::clone(&io_stream);
+    task::spawn(async move {
+        let mut stream = io_stream_clone.lock().unwrap().deref_mut().clone();
+        client.handle_messages(&mut stream, move |msg| {
+            let tx = tx_clone.clone();
+            async move {
+                if let Ok(msg_value) = serde_json::from_str::<Value>(&msg) {
+                    tx.send(msg_value).await.unwrap_or_else(|e| eprintln!("Send error: {}", e));
+                }
+                Ok(())
+            }
+        }).await.unwrap_or_else(|e| eprintln!("Network error: {}", e));
+    });
+
     let mut movement = movement::Movement {
         position: Vector2::new(400.0, 250.0),
         speed: 5.0,
@@ -105,9 +126,11 @@ pub fn main() {
     button.set_font_size(10);
     //loop
     let game_clone = Arc::clone(&game);
+    let io_stream_clone_for_receive = Arc::clone(&io_stream);
     let receive_thread: thread::JoinHandle<()> = thread::spawn(move || {
+        let io_stream = io_stream_clone_for_receive;
         while open {
-            let message = task::block_on(AsyncTcpClient::receive(&mut io_stream)).unwrap();
+            let message = task::block_on(AsyncTcpClient::receive(&mut io_stream.lock().unwrap())).unwrap();
             println!("Received: {}", message);
             handle_read::handle_read::handle_read_msg(&message, Arc::clone(&game_clone));
         }
@@ -159,6 +182,29 @@ pub fn main() {
             Color::RED,
         );
         button.draw(&mut d);
+
+        // Send position updates
+        let update_msg = json!({
+            "type": "update",
+            "player_id": sockID.to_string(),
+            "data": {
+                "x": movement.position.x,
+                "y": movement.position.y
+            }
+        });
+
+        task::block_on(AsyncTcpClient::send(&mut io_stream.lock().unwrap(), &update_msg.to_string())).unwrap_or_else(|e| eprintln!("Send error: {}", e));
+
+        // Process received messages
+        while let Ok(msg) = rx.try_recv() {
+            match msg["type"].as_str() {
+                Some("update_confirm") => {
+                    // Handle confirmation
+                },
+                Some(msg_type) => println!("Received message type: {}", msg_type),
+                None => println!("Received invalid message format")
+            }
+        }
     }
     //closing sequence
     open = rl.window_should_close();
