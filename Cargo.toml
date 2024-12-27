@@ -5,10 +5,12 @@ edition = "2021"
 
 [dependencies]
 async-std = "1.13.0"
+get_if_addrs = "0.5.3"
 native-dialog = "0.7.0"
 raylib = "5.0.2"
 raylib_interactive = "0.1.4"
 serde_json = "1.0.133"
+tokio = "1.42.0"
 
 [lib]
 name = "rust_sandbox_lib"

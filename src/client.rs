@@ -64,7 +64,25 @@ pub fn main() {
     //init stuff here
     
     let mut client = AsyncTcpClient::new(format!("{}:{}", settings["IP"].as_str().unwrap(), settings["PORT"].as_str().unwrap()).as_str());
-    let io_stream = Arc::new(Mutex::new(task::block_on(client.connect()).unwrap()));
+    let io_stream = Arc::new(Mutex::new({
+        let mut retry_count = 0;
+        const MAX_RETRIES: u32 = 5;
+        const RETRY_DELAY_MS: u64 = 500;
+
+        loop {
+            match task::block_on(client.connect()) {
+                Ok(stream) => break stream,
+                Err(e) => {
+                    if retry_count >= MAX_RETRIES {
+                        panic!("Failed to connect after {} retries: {}", MAX_RETRIES, e);
+                    }
+                    println!("Connection attempt {} failed, retrying in {}ms...", retry_count + 1, RETRY_DELAY_MS);
+                    task::block_on(async_std::task::sleep(Duration::from_millis(RETRY_DELAY_MS)));
+                    retry_count += 1;
+                }
+            }
+        }
+    }));
     let sockID: i32 = AsyncTcpClient::get_socket_id(&io_stream.lock().unwrap()) as i32;
 
     // Create message channel for communication between render and network threads
@@ -142,7 +160,7 @@ pub fn main() {
         while open {
             let message = task::block_on(AsyncTcpClient::receive(&mut io_stream.lock().unwrap())).unwrap();
             println!("Received: {}", message);
-            handle_read::handle_read::handle_read_msg(&message, Arc::clone(&game_clone), &mut io_stream.lock().unwrap());
+            handle_read::handle_readd::handle_read_msg(&message, Arc::clone(&game_clone), &mut io_stream.lock().unwrap());
         }
     });
 

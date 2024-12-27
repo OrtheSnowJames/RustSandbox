@@ -6,6 +6,8 @@ use std::time::Duration;
 use std::os::unix::io::AsRawFd; // For Unix-based systems
 #[cfg(windows)]
 use std::os::windows::io::AsRawSocket; // For Windows
+use std::collections::HashMap;
+use std::sync::{Mutex};
 
 pub type ClientHandler = Arc<dyn Fn(TcpStream) + Send + Sync + 'static>;
 
@@ -119,6 +121,16 @@ impl AsyncTcpServer {
             stream.as_raw_socket() as usize
         }
     }
+
+    /// Sends a message to a specific client identified by socket ID
+    pub async fn send_to_socket(stream: &mut TcpStream, message: &str, target_socket_id: usize) -> async_std::io::Result<()> {
+        if Self::get_socket_id(stream) == target_socket_id {
+            stream.write_all(message.as_bytes()).await?;
+            stream.flush().await
+        } else {
+            Ok(())
+        }
+    }
 }
 
 pub struct AsyncTcpClient {
@@ -228,6 +240,28 @@ impl AsyncTcpClient {
         Ok(())
     }
 }
+
+// Add this new struct
+pub struct ClientConnections {
+    connections: HashMap<u32, TcpStream>,
+}
+
+impl ClientConnections {
+    pub fn new() -> Self {
+        ClientConnections {
+            connections: HashMap::new()
+        }
+    }
+
+    pub fn add_client(&mut self, id: u32, stream: TcpStream) {
+        self.connections.insert(id, stream);
+    }
+
+    pub fn get_client(&mut self, id: u32) -> Option<&mut TcpStream> {
+        self.connections.get_mut(&id)
+    }
+}
+
 //basic other functions
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::Command;
@@ -259,7 +293,7 @@ fn get_local_ip() -> Result<IpAddr, Box<dyn std::error::Error>> {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn get_local_ip() -> Result<IpAddr, Box<dyn std::error::Error>> {
     // Linux/macOS implementation using `ip`
-    let output = Command::new("ip")
+    let output = Command::new("ip addr")
         .arg("addr")
         .arg("show")
         .output()?;

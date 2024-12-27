@@ -4,12 +4,15 @@ use std::thread;
 use async_std::task;
 use serde_json::Value;
 use serde_json::json;
+use crate::randommods;
 use serde_json::from_str;
 use serde_json::to_string;
 use std::sync::{Arc, Mutex};
 
 use crate::networking::AsyncTcpServer;
 use crate::networking;
+use crate::handle_read::*;
+use crate::networking::ClientConnections;
 
 pub fn main() {
     let data_json = std::fs::read_to_string("data.json").expect("Failed to read data.json");
@@ -17,13 +20,13 @@ pub fn main() {
     let settings = data["settings"].clone();
     let port_str = settings["PORT"].as_str().expect("Expected a string for PORT").to_string();
     let port = from_str::<u16>(&port_str).expect("Failed to parse PORT as u16");
-    let ip_addr = networking::get_local_ip().expect("Failed to get local IP");
-
+    let ip_addr = randommods::get_external_ipv4().expect("Failed to get local IP");
     let server = AsyncTcpServer::new(&format!("{}:{}", ip_addr, port), std::sync::Arc::new(|_| {}));
     
     println!("Server starting on {}:{}", ip_addr, port);
     
     // Create a game state that can be shared between connections
+    let clients = Arc::new(Mutex::new(ClientConnections::new()));
     let game_state = Arc::new(Mutex::new(json!({
         "room1": {
             "objects": [
@@ -46,28 +49,14 @@ pub fn main() {
     })));
 
     task::block_on(async move {
-        server.run_with_messages(move |msg, mut stream| {
+        server.run_with_messages(move |msg, stream| {
             let game_state = game_state.clone();
+            let clients = clients.clone();
             async move {
-                let msg_value: Value = serde_json::from_str(&msg).unwrap_or(json!({}));
+                let client_id = AsyncTcpServer::get_socket_id(&stream);
+                clients.lock().unwrap().add_client(client_id as u32, stream.clone());
                 
-                // Handle the message and update game state
-                let response = {
-                    let mut state = game_state.lock().unwrap();
-                    match msg_value["type"].as_str() {
-                        Some("update") => {
-                            if let Some(player_id) = msg_value["player_id"].as_str() {
-                                state["players"][player_id] = msg_value["data"].clone();
-                                json!({"status": "ok", "type": "update_confirm"})
-                            } else {
-                                json!({"status": "error", "message": "missing player_id"})
-                            }
-                        },
-                        _ => json!({"status": "error", "message": "unknown message type"})
-                    }
-                };
-
-                AsyncTcpServer::send(&mut stream, &response.to_string()).await?;
+                handle_read_server(&msg, game_state.clone(), client_id as u32, &mut clients.lock().unwrap());
                 Ok(())
             }
         }).await.expect("Server failed to run");

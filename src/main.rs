@@ -7,6 +7,7 @@ use std::thread;
 use std::env;
 use std::io::{self, Write};
 use native_dialog::FileDialog;
+
 mod client;
 mod server;
 mod randommods;
@@ -22,6 +23,7 @@ fn main() {
     });
     println!("Settings started.");
     settings_thread.join().expect("Settings thread panicked");
+
     let args: Vec<String> = env::args().collect();
     let launchfile_content = match std::fs::read_to_string("./launchfile.json") {
         Ok(content) => content,
@@ -87,15 +89,19 @@ fn main() {
         let server_thread: thread::JoinHandle<()> = thread::spawn(|| {
             server::main();
         });
-        server_thread.join().expect("Server thread panicked");
     }
 
     if launch.contains(&"client.rs".to_string()) {
+        //2 second timer for client so it doesn't start before server
+        println!("Will start client in 2 seconds...");
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        
         println!("Starting client...");
         let client_thread: thread::JoinHandle<()> = thread::spawn(|| {
             client::main();
         });
         client_thread.join().expect("Client thread panicked");
     }
+
     println!("Exiting...");
 }

@@ -1,14 +1,14 @@
 use serde_json::Value;
 use serde_json::json;
-use crate::networking::{AsyncTcpClient, AsyncTcpServer};
+use crate::networking::{AsyncTcpClient, AsyncTcpServer, ClientConnections};
 use crate::randommods::*;
 use std::sync::{Arc, Mutex};
 use async_std::task;
 use async_std::net::TcpStream;
 
-pub struct handle_read;
+pub struct handle_readd;
 
-impl handle_read {
+impl handle_readd {
     fn get_game_handler(game: &mut Value, message_json: &String) -> Value {
         // Update the game state
         let json_value: Value = serde_json::from_str(message_json).unwrap_or_else(|_| Value::Null);
@@ -119,19 +119,19 @@ impl handle_read {
 
         // Check the message type and dispatch to handlers
         if json_contains(&message_json, "get_game") {
-            *game = handle_read::get_game_handler(&mut *game, message);
+            *game = handle_readd::get_game_handler(&mut *game, message);
         }
 
         if json_contains(&message_json, "get_player") {
-            handle_read::get_player_handler(&mut *game, &message_json);
+            handle_readd::get_player_handler(&mut *game, &message_json);
         }
 
         if json_contains(&message_json, "update_position") {
-            handle_read::update_position(&mut *game, &message_json);
+            handle_readd::update_position(&mut *game, &message_json);
         }
 
         if json_contains(&message_json, "update_npc_position") {
-            handle_read::update_npc_position(&mut *game, &message_json);
+            handle_readd::update_npc_position(&mut *game, &message_json);
         }
 
         // Send a response if needed
@@ -158,49 +158,55 @@ what client sends server some parts are usually missing:
     });
 */
 
-fn handle_read_server(message: &String, game: Arc<Mutex<Value>>, stream: &mut TcpStream) {
+pub fn handle_read_server(message: &String, game: Arc<Mutex<Value>>, client_id: u32, clients: &mut ClientConnections) {
     let message_json: Value = serde_json::from_str(message).unwrap_or_else(|_| Value::Null);
-    if message_json.is_null() {
-        println!("Invalid JSON message: {}", message);
-        return;
-    } else {
-        //TODO: add more functionallity to this
-        if json_contains(&message_json, "x") {
-            // find client based on id and update position
-            let mut game_unwrapped = game.lock().unwrap();
-            if let Value::Object(game_obj) = &mut *game_unwrapped {
-                for (_key, room) in game_obj.iter_mut() {
-                    if let Some(players) = room.get_mut("players").and_then(|p| p.as_array_mut()) {
-                        for player in players.iter_mut() {
-                            if player["id"] == message_json["id"] {
-                                // Update position-related fields
-                                if let Some(x) = message_json.get("x") {
-                                    player["x"] = x.clone();
+    
+    if let Some(client_stream) = clients.get_client(client_id) {
+        if message_json.is_null() {
+            println!("Invalid JSON message: {}", message);
+            return;
+        } else {
+            if json_contains(&message_json, "x") {
+                // find client based on id and update position
+                let mut game_unwrapped = game.lock().unwrap();
+                if let Value::Object(game_obj) = &mut *game_unwrapped {
+                    for (_key, room) in game_obj.iter_mut() {
+                        if let Some(players) = room.get_mut("players").and_then(|p| p.as_array_mut()) {
+                            for player in players.iter_mut() {
+                                if player["id"] == message_json["id"] {
+                                    // Update position-related fields
+                                    if let Some(x) = message_json.get("x") {
+                                        player["x"] = x.clone();
+                                    }
+                                    if let Some(y) = message_json.get("y") {
+                                        player["y"] = y.clone();
+                                    }
+                                    if let Some(width) = message_json.get("width") {
+                                        player["width"] = width.clone();
+                                    }
+                                    if let Some(height) = message_json.get("height") {
+                                        player["height"] = height.clone();
+                                    }
+                                    if let Some(sprite_state) = message_json.get("sprite_state") {
+                                        player["sprite_state"] = sprite_state.clone();
+                                    }
+                                    let response: Value = json!({"update_position": {"x": player["x"], "y": player["y"], "width": player["width"], "height": player["height"], "sprite_state": player["sprite_state"], "id": player["id"]}});
+                                    task::block_on(AsyncTcpServer::send_to_socket(client_stream, &response.to_string(), client_id as usize))
+                                        .unwrap_or_else(|e| eprintln!("Send error: {}", e));
+                                    break;
                                 }
-                                if let Some(y) = message_json.get("y") {
-                                    player["y"] = y.clone();
-                                }
-                                if let Some(width) = message_json.get("width") {
-                                    player["width"] = width.clone();
-                                }
-                                if let Some(height) = message_json.get("height") {
-                                    player["height"] = height.clone();
-                                }
-                                if let Some(sprite_state) = message_json.get("sprite_state") {
-                                    player["sprite_state"] = sprite_state.clone();
-                                }
-                                break;
                             }
                         }
                     }
+                } else {
+                    println!("Invalid game state: {:?}", game_unwrapped);
                 }
-            } else {
-                println!("Invalid game state: {:?}", game_unwrapped);
             }
-        }
 
-        // Send a response if needed
-        let response = json!({"status": "ok"});
-        task::block_on(AsyncTcpServer::send(stream, &response.to_string())).unwrap_or_else(|e| eprintln!("Send error: {}", e));
-    }    
+            // Send a response only to the original client
+            let response = json!({"status": "ok"});
+            task::block_on(AsyncTcpServer::send(client_stream, &response.to_string()))
+                .unwrap_or_else(|e| eprintln!("Send error: {}", e));
+        }
+    }
 }

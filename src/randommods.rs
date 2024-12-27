@@ -87,3 +87,25 @@ fn find_changes(old_value: &Value, new_value: &Value) -> Value {
         })
     }
 }
+
+use get_if_addrs::{get_if_addrs, IfAddr};
+use std::net::Ipv4Addr;
+
+/// Find the first non-loopback IPv4 address on the system.
+pub fn get_external_ipv4() -> Option<Ipv4Addr> {
+    // Get the list of interfaces.
+    let interfaces = get_if_addrs().ok()?;
+
+    for iface in interfaces {
+        // We're only interested in IPv4 addresses.
+        if let IfAddr::V4(addr_info) = iface.addr {
+            let ip = addr_info.ip;
+            // Skip loopback (127.x.x.x) and unspecified (0.0.0.0).
+            if !ip.is_loopback() && !ip.is_unspecified() {
+                return Some(ip);
+            }
+        }
+    }
+
+    None
+}
